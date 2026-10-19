@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>摄像头录像</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #111; overflow: hidden;
+    font-family: -apple-system, "PingFang SC", sans-serif; user-select: none; }
+  #preview { width: 100%; height: 100%; object-fit: cover; background: #000; }
+  #rec { position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,.55); color: #fff; padding: 6px 14px; border-radius: 999px;
+    font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  #rec .dot { width: 10px; height: 10px; border-radius: 50%; background: #ff3b30;
+    animation: blink 1s steps(2, jump-none) infinite; }
+  @keyframes blink { to { opacity: .2; } }
+  #controls { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 16px;
+    display: flex; align-items: center; gap: 10px;
+    background: linear-gradient(transparent, rgba(0,0,0,.75)); }
+  button { border: 0; border-radius: 999px; padding: 9px 22px; font-size: 14px;
+    cursor: pointer; font-family: inherit; }
+  #btnRecord { background: #ff3b30; color: #fff; }
+  #btnRecord.recording { background: #fff; color: #111; }
+  #btnSave { background: #0a84ff; color: #fff; }
+  #btnOpen { background: rgba(255,255,255,.25); color: #fff; }
+  #btnClose { background: rgba(255,255,255,.15); color: #fff; }
+  #hint { flex: 1; color: rgba(255,255,255,.85); font-size: 12px;
+    text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <img id="preview" alt="">
+  <div id="rec" class="hidden"><span class="dot"></span>REC <span id="timer">00:00</span></div>
+  <div id="controls">
+    <button id="btnRecord" disabled>开始录像</button>
+    <button id="btnSave" class="hidden">保存到…</button>
+    <button id="btnOpen" class="hidden">在访达中显示</button>
+    <button id="btnClose">退出</button>
+    <button id="btnLog">日志</button>
+    <span id="hint">正在启动摄像头…</span>
+  </div>
+
+<script>
+// 流程: 初始化(实时预览,未录制) → 开始录像 → 停止 → 保存 → 回到初始化(预览常开可再录)
+const cam = window.camRecorder;
+window.onerror = (msg, src, line) => cam.log && cam.log(`JS error: ${msg} @${line}`);
+const $ = (id) => document.getElementById(id);
+const img = $('preview'), btn = $('btnRecord'), btnSave = $('btnSave'), btnOpen = $('btnOpen');
+const btnClose = $('btnClose'), btnLog = $('btnLog'), recBadge = $('rec'), timer = $('timer'), hint = $('hint');
+
+let ready = false, recording = false, saving = false, secs = 0, timerId = null, blobUrl = null;
+const fmt = (s) => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+
+cam.onFrame((buf) => {
+  if (blobUrl) URL.revokeObjectURL(blobUrl);
+  blobUrl = URL.createObjectURL(new Blob([buf], { type: 'image/jpeg' }));
+  img.src = blobUrl;
+  if (!ready) { // 首帧 = 预览就绪,可开始录制
+    ready = true;
+    if (!recording && !saving) { btn.disabled = false; hint.textContent = '实时预览中 · 点「开始录像」'; }
+  }
+});
+cam.onStatus((t) => { hint.textContent = t; });
+cam.onDone((res) => {
+  recBadge.classList.add('hidden');
+  clearInterval(timerId);
+  saving = false;
+  recording = false;
+  ready = true;
+  // 回到初始化:预览继续,可再次录制
+  btn.classList.remove('recording');
+  btn.textContent = '开始录像';
+  btn.disabled = false;
+  if (res.ok) {
+    hint.textContent = '已保存: ' + res.path + ' · 可再录或退出';
+    btnSave.classList.remove('hidden');
+    btnOpen.classList.remove('hidden');
+  } else {
+    hint.textContent = res.error;
+  }
+});
+
+btn.addEventListener('click', () => {
+  if (saving || !ready) return;
+  if (recording) {
+    cam.stopRecord();
+    saving = true;
+    btn.disabled = true;
+    btn.textContent = '保存中…';
+  } else {
+    cam.startRecord();
+    recording = true;
+    secs = 0; timer.textContent = '00:00';
+    recBadge.classList.remove('hidden');
+    timerId = setInterval(() => { secs++; timer.textContent = fmt(secs); }, 1000);
+    btn.textContent = '停止录像';
+    btn.classList.add('recording');
+  }
+});
+
+btnSave.addEventListener('click', () => {
+  const r = cam.saveAs();
+  if (r === null) hint.textContent = '暂无已保存的视频';
+  else if (r.error) hint.textContent = '保存失败: ' + r.error;
+  else { hint.textContent = '已保存: ' + r; btnOpen.classList.remove('hidden'); }
+});
+btnOpen.addEventListener('click', () => cam.showInFinder());
+btnClose.addEventListener('click', () => { cam.close(); try { utools.outPlugin(); } catch (e) { window.close(); } });
+btnLog.addEventListener('click', () => cam.openLog());
+window.addEventListener('beforeunload', () => cam.close());
+
+cam.startPreview();
+
+// 权限触发(仅确保 uTools 相机/麦克风授权在,取流立即释放,不参与录制)
+if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    .then((s) => { cam.log('权限触发: 相机+麦克风可取流'); s.getTracks().forEach((t) => t.stop()); })
+    .catch((e) => cam.log('权限触发失败: ' + e.name + ' ' + e.message));
+} else {
+  cam.log('页面无 getUserMedia');
+}
+</script>
+</body>
+</html>

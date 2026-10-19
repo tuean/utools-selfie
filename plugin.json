@@ -1,0 +1,21 @@
+{
+  "pluginName": "摄像头录像",
+  "description": "通过 Mac 前置摄像头录制视频（MP4，含声音）",
+  "author": "tuean",
+  "version": "0.1.0",
+  "main": "index.html",
+  "preload": "preload.js",
+  "logo": "logo.png",
+  "features": [
+    {
+      "code": "cam-record",
+      "explain": "打开前置摄像头录制视频",
+      "cmds": ["自拍"]
+    }
+  ],
+  "pluginSetting": {
+    "height": 540,
+    "width": 720
+  },
+  "platform": ["darwin"]
+}
